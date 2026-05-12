@@ -27,6 +27,8 @@ from transformers import (
     Trainer,
     TrainingArguments,
 )
+from sklearn.metrics import precision_score, recall_score
+from transformers import set_seed
 
 
 # 3-class sentiment label mapping (matches the curated dataset's `label` column)
@@ -54,11 +56,14 @@ def prepare_dataset(data_path: str, test_size: float = 0.2, seed: int = 42) -> D
 
     Returns a `DatasetDict` with "train" and "test" keys.
     """
-    # TODO: read the CSV with pandas
-    # TODO: convert with Dataset.from_pandas(df, preserve_index=False)
-    # TODO: split with .train_test_split(test_size=test_size, seed=seed)
-    # TODO: return the resulting DatasetDict
-    raise NotImplementedError
+    #  read the CSV with pandas
+    df=pd.read_csv(data_path)
+    # convert with Dataset.from_pandas(df, preserve_index=False)
+    data_set=Dataset.from_pandas(df,preserve_index=False)
+    # split with .train_test_split(test_size=test_size, seed=seed)
+    ds_dict=data_set.train_test_split(test_size=test_size,seed=seed)
+    # return the resulting DatasetDict
+    return ds_dict
 
 
 def tokenize_dataset(ds_dict: DatasetDict, tokenizer, max_length: int = 128) -> DatasetDict:
@@ -73,10 +78,17 @@ def tokenize_dataset(ds_dict: DatasetDict, tokenizer, max_length: int = 128) -> 
     Note: this signature differs from the drill (`tokenize_dataset(ds, name)`)
     by accepting the loaded tokenizer object so `main()` doesn't re-load it.
     """
-    # TODO: define tokenize_fn(batch) calling the passed-in tokenizer with truncation + max_length
-    # TODO: apply ds_dict.map(tokenize_fn, batched=True)
-    # TODO: return the tokenized DatasetDict
-    raise NotImplementedError
+    #  define tokenize_fn(batch) calling the passed-in tokenizer with truncation + max_length
+    def tokenize_fn(batch):
+        return tokenizer(
+            batch["text"],
+            truncation = True , 
+            max_length=max_length
+        )
+    #  apply ds_dict.map(tokenize_fn, batched=True)
+    tokenized = ds_dict.map(tokenize_fn,batched=True)
+    #  return the tokenized DatasetDict
+    return tokenized
 
 
 def make_training_args(
@@ -87,14 +99,26 @@ def make_training_args(
     seed: int = 42,
 ) -> TrainingArguments:
     """Return a TrainingArguments configured for fine-tuning."""
-    # TODO: return a TrainingArguments configured with the passed arguments.
+    #  return a TrainingArguments configured with the passed arguments.
     # In addition to wiring the kwargs through, set:
     #   - eval_strategy="epoch"           (renamed from evaluation_strategy in transformers 4.41+)
     #   - save_strategy="epoch"
     #   - logging_steps=50
     # The course pins transformers>=4.41,<5.0 — use the new argument names.
-    raise NotImplementedError
-
+    traning_args= TrainingArguments(
+        output_dir=output_dir,
+        learning_rate=lr,
+        num_train_epochs=epochs,
+        per_device_eval_batch_size=batch_size,
+        per_device_train_batch_size=batch_size,
+        eval_strategy="epoch",
+        save_strategy="epoch",
+        seed=seed,
+        logging_steps=50
+    )
+    traning_args.eval_strategy = "epoch"
+    traning_args.save_strategy = "epoch"
+    return traning_args
 
 def compute_metrics(eval_pred):
     """
@@ -102,11 +126,16 @@ def compute_metrics(eval_pred):
 
     Use sklearn's accuracy_score and f1_score with average="macro".
     """
-    # TODO: unpack eval_pred to logits, labels
-    # TODO: argmax logits over axis 1
-    # TODO: compute accuracy and macro-F1
-    # TODO: return as a dict
-    raise NotImplementedError
+    #  unpack eval_pred to logits, labels
+    logits,labels= eval_pred
+    #  argmax logits over axis 1
+    predictions=np.argmax(logits,axis=1)
+    #  compute accuracy and macro-F1
+    #  return as a dict
+    return{
+         "accuracy": accuracy_score(labels, predictions),
+        "macro_f1": f1_score(labels, predictions, average="macro")
+    }
 
 
 def train_classifier(
@@ -124,13 +153,32 @@ def train_classifier(
     the human-readable label names — Integration 7A reads them from
     `model.config.id2label` rather than hard-coding.
     """
-    # TODO: load model with AutoModelForSequenceClassification.from_pretrained(
+    # load model with AutoModelForSequenceClassification.from_pretrained(
     #         model_name, num_labels=num_labels, id2label=ID2LABEL, label2id=LABEL2ID)
-    # TODO: build data_collator = DataCollatorWithPadding(tokenizer=tokenizer)
-    # TODO: build Trainer with model, args, train/eval datasets, tokenizer, data_collator, compute_metrics
-    # TODO: call trainer.train()
-    # TODO: return trainer
-    raise NotImplementedError
+    model =AutoModelForSequenceClassification.from_pretrained(
+        model_name, 
+        num_labels=num_labels, 
+        id2label=ID2LABEL, 
+        label2id=LABEL2ID
+    )
+    #  build data_collator = DataCollatorWithPadding(tokenizer=tokenizer)
+    data_collator = DataCollatorWithPadding(tokenizer=tokenizer)
+    #  build Trainer with model, args, train/eval datasets, tokenizer, data_collator, compute_metrics
+    trainer=Trainer(
+        model=model,
+        args=training_args,
+        train_dataset=tokenized_ds["train"],
+        eval_dataset=tokenized_ds['test'],
+        tokenizer=tokenizer,
+        data_collator=data_collator,
+        compute_metrics=compute_metrics
+             
+    )
+    #  call trainer.train()
+    trainer.train()
+    #  return trainer
+    return trainer
+    
 
 
 def evaluate_classifier(trainer: Trainer, tokenized_test) -> dict:
@@ -141,13 +189,31 @@ def evaluate_classifier(trainer: Trainer, tokenized_test) -> dict:
 
     Returns: {"accuracy": float, "macro_f1": float, "per_class_f1": {label_name: f1, ...}}
     """
-    # TODO: predict on tokenized_test using trainer.predict
-    # TODO: argmax predictions to class indices
+    # predict on tokenized_test using trainer.predict
+    prediction_output=trainer.predict(tokenized_test)
+    logits =prediction_output.predictions
+    labels= prediction_output.label_ids
+    # argmax predictions to class indices
+    preds=np.argmax(logits,axis=1)
+    
     # TODO: compute accuracy and macro-F1
-    # TODO: compute per-class F1 with f1_score(..., average=None)
-    # TODO: build per_class_f1 dict using trainer.model.config.id2label for label names
-    # TODO: return all three
-    raise NotImplementedError
+    accuracy=accuracy_score(labels,preds)
+    macro_f1=f1_score(labels,preds,average="macro")
+    #  compute per-class F1 with f1_score(..., average=None)
+    per_class_f1=f1_score(labels,preds,average=None)
+    per_class_precision=precision_score(labels,preds,average=None,zero_division=0)
+    per_class_recall=recall_score(labels,preds,average=None,zero_division=0)
+    
+    #  build per_class_f1 dict using trainer.model.config.id2label for label names
+    id2label=trainer.model.config.id2label
+    # return all three
+    return{
+        "accuracy":float(accuracy),
+        "macro_f1":float(macro_f1),
+        "per_class_f1":{id2label[i]: float(f) for i, f in enumerate(per_class_f1)},
+        "per_class_precision":{id2label[i]: float(p) for i, p in enumerate(per_class_precision)},
+        "per_class_recall": {id2label[i]: float(r) for i, r in enumerate(per_class_recall)}
+    }
 
 
 def main() -> None:
@@ -155,6 +221,7 @@ def main() -> None:
     data_path = get_data_path()
     output_dir = "model"
     model_name = "distilbert-base-uncased"
+    set_seed(42)
 
     ds = prepare_dataset(data_path)
     tokenizer = AutoTokenizer.from_pretrained(model_name)
@@ -179,10 +246,15 @@ def main() -> None:
     pred_probs = _softmax(pred_logits)
     id2label = trainer.model.config.id2label
     df_out = pd.DataFrame({
-        "text": ds["test"]["text"],
-        "label": [id2label[i] for i in ds["test"]["label"]],
-        "predicted_label": [id2label[i] for i in pred_idx],
-        "predicted_probability": [float(pred_probs[i, pred_idx[i]]) for i in range(len(pred_idx))],
+    "text": ds["test"]["text"],
+    "label": [id2label[i] for i in ds["test"]["label"]],
+    "predicted_label": [id2label[i] for i in pred_idx],
+    "predicted_probability": [
+        float(pred_probs[i, pred_idx[i]]) for i in range(len(pred_idx))
+    ],
+    "prob_negative": pred_probs[:, 0],
+    "prob_neutral": pred_probs[:, 1],
+    "prob_positive": pred_probs[:, 2],
     })
     df_out.to_csv("predictions.csv", index=False)
 
@@ -197,6 +269,14 @@ def main() -> None:
         labels=list(id2label.values()),
     )
     print(pd.DataFrame(cm, index=list(id2label.values()), columns=list(id2label.values())).to_string())
+    
+    cm_df = pd.DataFrame(
+    cm,
+    index=list(id2label.values()),
+    columns=list(id2label.values())
+)
+
+    cm_df.to_csv("confusion_matrix.csv")
 
     # Push to Hugging Face Hub.
     # Skipped in CI (DATA_PATH set); requires `huggingface-cli login` locally.
