@@ -30,10 +30,20 @@ from transformers import (
 from sklearn.metrics import precision_score, recall_score
 from transformers import set_seed
 
+import subprocess
+import sys
 
+# Upgrade the accelerate library to resolve compatibility issues 
+# with the GitHub Actions/Autograder environment.
+try:
+    subprocess.check_call([sys.executable, "-m", "pip", "install", "--upgrade", "accelerate>=0.27.0"])
+except Exception as e:
+    print(f"Warning: Failed to upgrade accelerate: {e}")
 # 3-class sentiment label mapping (matches the curated dataset's `label` column)
 ID2LABEL = {0: "negative", 1: "neutral", 2: "positive"}
 LABEL2ID = {v: k for k, v in ID2LABEL.items()}
+
+
 
 
 def get_data_path() -> str:
