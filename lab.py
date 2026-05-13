@@ -124,7 +124,11 @@ def make_training_args(
         eval_strategy="epoch",
         save_strategy="epoch",
         seed=seed,
-        logging_steps=50
+        logging_steps=50,
+        # Disable all experiment tracking logging
+        report_to="none",  
+        # Disable torch_compile to resolve compatibility issues with transformers and accelerate in the Autograder.
+        torch_compile=False
     )
     traning_args.eval_strategy = "epoch"
     traning_args.save_strategy = "epoch"
