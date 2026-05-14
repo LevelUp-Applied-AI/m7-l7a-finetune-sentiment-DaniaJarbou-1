@@ -292,19 +292,23 @@ def main() -> None:
 
     cm_df.to_csv("confusion_matrix.csv")
 
-    # Push to Hugging Face Hub.
-    # Skipped in CI (DATA_PATH set); requires `huggingface-cli login` locally.
+   # Push to Hugging Face Hub.
     if os.environ.get("DATA_PATH") is None:
         repo_id = "m7-app-review-sentiment"
         try:
-            trainer.push_to_hub(repo_id)
-            tokenizer.push_to_hub(repo_id)
-            print(f"\nPushed to https://huggingface.co/<your-username>/{repo_id}")
+            # Use HfApi.upload_folder to ensure all contents of the model directory,
+            # including config.json and weights, are uploaded to the Hub.
+            from huggingface_hub import HfApi
+            api = HfApi()
+            api.upload_folder(
+                folder_path=output_dir,
+                repo_id=f"DaniaJarbou/{repo_id}",
+                repo_type="model"
+            )
+            print(f"\nSuccessfully uploaded full folder to Hugging Face")
         except Exception as e:
             print(f"\nHF Hub push failed: {e}")
-            print("Run `huggingface-cli login` and try again.")
-
-
+            print("Ensure you are logged in via `huggingface-cli login`.")
 def _softmax(logits: np.ndarray) -> np.ndarray:
     """Numerically stable softmax over the last dimension."""
     shifted = logits - logits.max(axis=-1, keepdims=True)
